@@ -1,32 +1,59 @@
 package com.example.munch
 
 import android.app.DatePickerDialog
+import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.util.Base64
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.DinnerDining
+import androidx.compose.material.icons.rounded.LocalPizza
+import androidx.compose.material.icons.rounded.LocalShipping
+import androidx.compose.material.icons.rounded.Restaurant
+import androidx.compose.material.icons.rounded.RestaurantMenu
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.TaskAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.example.munch.data.DatosBanco
+import com.example.munch.data.EstadoPedido
+import com.example.munch.data.Pedido
+import com.example.munch.data.RepositorioPedidos
 import com.example.munch.ui.theme.MunchTheme
+import com.google.firebase.FirebaseApp
 import java.util.Calendar
 import java.util.Locale
 
@@ -105,6 +132,10 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MunchApp() {
+    val contexto = LocalContext.current
+    LaunchedEffect(Unit) {
+        RepositorioPedidos.inicializar(contexto)
+    }
     // 0: inicio, 1: detalle, 2: personalización,
     // 3: entrega y pago, 4: tu paquete, 5: cocina paso a paso
     var pantalla by rememberSaveable { mutableStateOf(0) }
@@ -117,6 +148,7 @@ fun MunchApp() {
     var metodoPago by rememberSaveable {
         mutableStateOf("Transferencia bancaria")
     }
+    var comprobanteUri by rememberSaveable { mutableStateOf("") }
     var numeroPedido by rememberSaveable { mutableStateOf("") }
 
     val kit = kits.getOrNull(indiceKit)
@@ -179,15 +211,43 @@ fun MunchApp() {
                     fecha = fecha,
                     horario = horario,
                     metodoPago = metodoPago,
+                    comprobanteUri = comprobanteUri,
                     alCambiarDireccion = { direccion = it },
                     alCambiarFecha = { fecha = it },
                     alCambiarHorario = { horario = it },
                     alCambiarPago = { metodoPago = it },
+                    alCambiarComprobante = { comprobanteUri = it },
                     modifier = modificador,
                     alVolver = volver,
-                    alConfirmar = {
-                        numeroPedido = "DEMO-${System.currentTimeMillis()}"
-                        pantalla = 4
+                    alConfirmar = { alFin ->
+                        val idGenerado = "DEMO-${System.currentTimeMillis().toString().takeLast(4)}"
+                        val nuevoPedido = Pedido(
+                            id = idGenerado,
+                            kitNombre = kit.nombre,
+                            platillo = kit.platillo,
+                            porciones = porciones,
+                            preferencias = preferencias,
+                            direccion = direccion,
+                            fecha = fecha,
+                            horario = horario,
+                            metodoPago = metodoPago,
+                            comprobanteUri = comprobanteUri.ifBlank { null },
+                            estado = if (metodoPago == "Transferencia bancaria") EstadoPedido.COMPROBANTE_ENVIADO else EstadoPedido.PAGO_CONFIRMADO
+                        )
+
+                        RepositorioPedidos.guardarPedidoConContexto(
+                            contexto = contexto,
+                            pedido = nuevoPedido,
+                            alInicio = {},
+                            alExito = {
+                                numeroPedido = idGenerado
+                                alFin()
+                                pantalla = 4
+                            },
+                            alError = {
+                                alFin()
+                            }
+                        )
                     }
                 )
 
@@ -541,24 +601,23 @@ private fun PantallaEntregaPago(
     fecha: String,
     horario: String,
     metodoPago: String,
+    comprobanteUri: String,
     alCambiarDireccion: (String) -> Unit,
     alCambiarFecha: (String) -> Unit,
     alCambiarHorario: (String) -> Unit,
     alCambiarPago: (String) -> Unit,
+    alCambiarComprobante: (String) -> Unit,
     modifier: Modifier = Modifier,
     alVolver: () -> Unit,
-    alConfirmar: () -> Unit
+    alConfirmar: (() -> Unit) -> Unit
 ) {
     val contexto = LocalContext.current
 
-    var mostrarResumen by rememberSaveable {
-        mutableStateOf(false)
-    }
+    var mostrarResumen by rememberSaveable { mutableStateOf(false) }
+    var cargando by rememberSaveable { mutableStateOf(false) }
 
-    val formularioCompleto =
-        direccion.isNotBlank() &&
-                fecha.isNotBlank() &&
-                horario.isNotBlank()
+    val necesitaComprobante = metodoPago == "Transferencia bancaria" && comprobanteUri.isBlank()
+    val formularioCompleto = direccion.isNotBlank() && fecha.isNotBlank() && horario.isNotBlank() && !necesitaComprobante
 
     val elegirFecha: () -> Unit = {
         val hoy = Calendar.getInstance()
@@ -643,7 +702,6 @@ private fun PantallaEntregaPago(
         TituloSeccion("Horario de entrega")
 
         Column {
-            // Horarios de ejemplo.
             listOf(
                 "12:00–14:00",
                 "14:00–16:00",
@@ -672,7 +730,85 @@ private fun PantallaEntregaPago(
             }
         }
 
-        if (!formularioCompleto) {
+        if (metodoPago == "Transferencia bancaria") {
+            val datosBanco = DatosBanco()
+
+            TarjetaInformacion(fondo = Color(0xFFFFEDC3)) {
+                Text(
+                    text = "Datos para transferencia bancaria",
+                    color = Coral,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Text(text = "Banco: ${datosBanco.banco}", color = Texto, fontWeight = FontWeight.SemiBold)
+                Text(text = "CLABE: ${datosBanco.clabe}", color = Texto, fontWeight = FontWeight.Bold)
+                Text(text = "Titular: ${datosBanco.titular}", color = Texto)
+                Text(text = "Concepto: ${datosBanco.concepto}", color = Texto)
+            }
+
+            TituloSeccion("Comprobante de pago")
+
+            val selectorImagen = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.PickVisualMedia()
+            ) { uri ->
+                if (uri != null) {
+                    alCambiarComprobante(uri.toString())
+                }
+            }
+
+            if (comprobanteUri.isNotBlank()) {
+                TarjetaInformacion(fondo = Color(0xFFE5ECD7)) {
+                    Text(
+                        text = "✓ Comprobante adjuntado",
+                        color = Verde,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    ImagenComprobante(
+                        modelo = comprobanteUri,
+                        contentDescription = "Comprobante",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                    )
+
+                    OutlinedButton(
+                        onClick = {
+                            selectorImagen.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Cambiar imagen de comprobante", color = Verde)
+                    }
+                }
+            } else {
+                OutlinedButton(
+                    onClick = {
+                        selectorImagen.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 56.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("📷 Adjuntar captura de transferencia", color = Coral, fontSize = 16.sp)
+                }
+            }
+        }
+
+        if (necesitaComprobante) {
+            Text(
+                text = "⚠️ Debes adjuntar la captura de tu transferencia para poder continuar.",
+                color = Coral,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        } else if (!formularioCompleto) {
             Text(
                 text = "Completa la dirección, fecha y horario para continuar.",
                 color = Verde,
@@ -682,14 +818,44 @@ private fun PantallaEntregaPago(
 
         BotonPrincipal(
             texto = "Revisar pedido  ›",
-            habilitado = formularioCompleto,
+            habilitado = formularioCompleto && !cargando,
             alPulsar = { mostrarResumen = true }
+        )
+    }
+
+    if (cargando) {
+        AlertDialog(
+            onDismissRequest = { },
+            containerColor = Crema,
+            title = {
+                Text(
+                    text = "Subiendo comprobante...",
+                    color = Coral,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.padding(8.dp)
+                ) {
+                    CircularProgressIndicator(color = Coral)
+                    Text(
+                        text = "Subiendo imagen a Firebase Storage y registrando pedido...",
+                        color = Texto,
+                        fontSize = 14.sp
+                    )
+                }
+            },
+            confirmButton = {}
         )
     }
 
     if (mostrarResumen) {
         AlertDialog(
-            onDismissRequest = { mostrarResumen = false },
+            onDismissRequest = { if (!cargando) mostrarResumen = false },
             containerColor = Crema,
             title = {
                 TituloSeccion("Resumen del pedido")
@@ -710,30 +876,28 @@ private fun PantallaEntregaPago(
                         horario = horario,
                         metodoPago = metodoPago
                     )
-
-                    Text(
-                        text = "La confirmación crea un pedido de prueba " +
-                                "en esta app. No se enviará al negocio.",
-                        color = Coral,
-                        fontWeight = FontWeight.SemiBold
-                    )
                 }
             },
             confirmButton = {
                 TextButton(
+                    enabled = !cargando,
                     onClick = {
                         mostrarResumen = false
-                        alConfirmar()
+                        cargando = true
+                        alConfirmar {
+                            cargando = false
+                        }
                     }
                 ) {
                     Text(
-                        text = "Confirmar pedido de prueba",
+                        text = if (cargando) "Procesando..." else "Confirmar pedido",
                         color = Coral
                     )
                 }
             },
             dismissButton = {
                 TextButton(
+                    enabled = !cargando,
                     onClick = { mostrarResumen = false }
                 ) {
                     Text("Editar", color = Verde)
@@ -757,6 +921,10 @@ private fun PantallaPaquete(
     alVolverInicio: () -> Unit,
     alCocinar: () -> Unit
 ) {
+    val listaPedidos by RepositorioPedidos.pedidos.collectAsState()
+    val pedidoActual = listaPedidos.find { it.id == numeroPedido }
+    val estadoActual = pedidoActual?.estado ?: if (metodoPago == "Transferencia bancaria") EstadoPedido.COMPROBANTE_ENVIADO else EstadoPedido.PAGO_CONFIRMADO
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -774,17 +942,33 @@ private fun PantallaPaquete(
 
         TituloPantalla("Tu paquete")
 
-        BotonPrincipal(
-            texto = "Cocina paso a paso",
-            alPulsar = alCocinar
-        )
-
         Text(
-            text = "Pedido de prueba",
+            text = "Pedido: $numeroPedido",
             color = Coral,
             fontSize = 16.sp,
             fontWeight = FontWeight.SemiBold
         )
+
+        TarjetaInformacion(
+            fondo = when (estadoActual) {
+                EstadoPedido.PAGO_CONFIRMADO -> Color(0xFFE5ECD7)
+                EstadoPedido.PAGO_RECHAZADO -> Color(0xFFFFDCD8)
+                else -> Color(0xFFFFEDC3)
+            }
+        ) {
+            Text(
+                text = estadoActual.titulo,
+                color = if (estadoActual == EstadoPedido.PAGO_RECHAZADO) Coral else Verde,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                text = estadoActual.descripcion,
+                color = Texto,
+                fontSize = 15.sp
+            )
+        }
 
         Box(
             modifier = Modifier
@@ -799,61 +983,62 @@ private fun PantallaPaquete(
             Text(text = "📦", fontSize = 90.sp)
         }
 
-        TarjetaInformacion(fondo = Color(0xFFE5ECD7)) {
-            Text(
-                text = "Pedido registrado",
-                color = Verde,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold
-            )
-
-            Text(
-                text = "Tu selección quedó registrada en esta demostración.",
-                color = Texto,
-                fontSize = 15.sp
-            )
-
-            Text(
-                text = numeroPedido,
-                color = Verde,
-                fontSize = 12.sp
-            )
-        }
-
-        TituloSeccion("Seguimiento")
+        TituloSeccion("Seguimiento del pedido")
 
         TarjetaInformacion {
-            listOf(
-                "Pedido registrado",
-                "Preparando tu kit",
-                "En camino",
-                "Entregado"
-            ).forEachIndexed { indice, estado ->
+            val estadosSecuencia = listOf(
+                EstadoPedido.COMPROBANTE_ENVIADO to "Comprobante recibido",
+                EstadoPedido.PAGO_CONFIRMADO to "Pago verificado",
+                EstadoPedido.EN_PREPARACION to "En preparación en cocina",
+                EstadoPedido.ENTREGADO_A_REPARTIDOR to "Entregado a repartidor 🛵",
+                EstadoPedido.ENTREGADO_A_CLIENTE to "Entregado al cliente 📦"
+            )
+
+            val ordenActual = when (estadoActual) {
+                EstadoPedido.PENDIENTE_PAGO -> 0
+                EstadoPedido.COMPROBANTE_ENVIADO -> 0
+                EstadoPedido.PAGO_CONFIRMADO -> 1
+                EstadoPedido.EN_PREPARACION -> 2
+                EstadoPedido.ENTREGADO_A_REPARTIDOR -> 3
+                EstadoPedido.ENTREGADO_A_CLIENTE -> 4
+                EstadoPedido.PAGO_RECHAZADO -> -1
+            }
+
+            estadosSecuencia.forEachIndexed { indice, (_, etiqueta) ->
+                val completado = ordenActual >= indice
+                val activo = ordenActual == indice
+
                 Row(
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(vertical = 4.dp)
                 ) {
                     Text(
-                        text = if (indice == 0) "●" else "○",
-                        color = if (indice == 0) Coral else Verde,
-                        fontSize = 24.sp
+                        text = if (completado) "●" else "○",
+                        color = if (activo) Coral else if (completado) Verde else Texto.copy(alpha = 0.4f),
+                        fontSize = 22.sp
                     )
 
                     Spacer(Modifier.width(12.dp))
 
                     Text(
-                        text = estado,
-                        color = if (indice == 0) {
-                            Texto
-                        } else {
-                            Texto.copy(alpha = 0.5f)
-                        },
-                        fontWeight = if (indice == 0) {
-                            FontWeight.Bold
-                        } else {
-                            FontWeight.Normal
-                        }
+                        text = etiqueta,
+                        color = if (activo || completado) Texto else Texto.copy(alpha = 0.5f),
+                        fontWeight = if (activo) FontWeight.Bold else FontWeight.Normal
                     )
                 }
+            }
+        }
+
+        if (!pedidoActual?.comprobanteUri.isNullOrBlank()) {
+            TituloSeccion("Comprobante adjuntado")
+            TarjetaInformacion {
+                AsyncImage(
+                    model = pedidoActual.comprobanteUri,
+                    contentDescription = "Comprobante de pago",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                )
             }
         }
 
@@ -869,23 +1054,11 @@ private fun PantallaPaquete(
                 horario = horario,
                 metodoPago = metodoPago
             )
-
-            Text(
-                text = if (metodoPago == "Transferencia bancaria") {
-                    "Transferencia pendiente de verificación."
-                } else {
-                    "Pago pendiente al recibir."
-                },
-                color = Coral,
-                fontWeight = FontWeight.SemiBold
-            )
         }
 
-        Text(
-            text = "Modo de prueba: no se ha enviado un pedido al negocio. " +
-                    "El seguimiento todavía no se actualiza automáticamente.",
-            color = Verde,
-            fontSize = 14.sp
+        BotonPrincipal(
+            texto = "Cocina paso a paso",
+            alPulsar = alCocinar
         )
 
         BotonPrincipal(
@@ -1103,6 +1276,80 @@ private fun TarjetaInformacion(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             content = contenido
         )
+    }
+}
+
+@Composable
+private fun ImagenComprobante(
+    modelo: String?,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop
+) {
+    val bitmap = remember(modelo) {
+        if (!modelo.isNullOrBlank()) {
+            try {
+                val cleanBase64 = if (modelo.contains("base64,")) {
+                    modelo.substringAfter("base64,")
+                } else {
+                    modelo
+                }.replace("\n", "").replace("\r", "").replace(" ", "").trim()
+
+                val imageBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                val decodedBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                if (decodedBitmap != null) {
+                    Log.d("MUNCH_FIREBASE", "Bitmap decodificado con éxito: ${decodedBitmap.width}x${decodedBitmap.height}")
+                    decodedBitmap.asImageBitmap()
+                } else {
+                    Log.e("MUNCH_FIREBASE", "BitmapFactory.decodeByteArray devolvió NULL")
+                    null
+                }
+            } catch (t: Throwable) {
+                Log.e("MUNCH_FIREBASE", "Error al decodificar Base64: ${t.message}", t)
+                null
+            }
+        } else {
+            null
+        }
+    }
+
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = contentDescription,
+            modifier = modifier,
+            contentScale = contentScale
+        )
+    } else if (!modelo.isNullOrBlank() && (modelo.startsWith("http://") || modelo.startsWith("https://") || modelo.startsWith("content://"))) {
+        AsyncImage(
+            model = modelo,
+            contentDescription = contentDescription,
+            modifier = modifier,
+            contentScale = contentScale
+        )
+    } else {
+        Box(
+            modifier = modifier.background(Color(0xFFE5ECD7)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "⚠️",
+                    fontSize = 32.sp
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = if (modelo.isNullOrBlank()) "Sin comprobante adjunto" else "No se pudo cargar la imagen",
+                    color = Coral,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
     }
 }
 

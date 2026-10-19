@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Munch"
 include(":app")
+include(":admin")

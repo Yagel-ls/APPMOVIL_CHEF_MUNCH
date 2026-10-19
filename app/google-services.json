@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "720736794797",
+    "project_id": "munchapp-9829d",
+    "storage_bucket": "munchapp-9829d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:720736794797:android:65d5c4424a5affdc51ae24",
+        "android_client_info": {
+          "package_name": "com.example.munch"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAPPDhfsXeX8e0cs_m3V1N6izKWHxf-XTU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:720736794797:android:297e0c5d22273cad51ae24",
+        "android_client_info": {
+          "package_name": "com.example.munch.admin"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAPPDhfsXeX8e0cs_m3V1N6izKWHxf-XTU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

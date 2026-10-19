@@ -1,0 +1,3 @@
+com.example.munch.admin
+string app_name
+style Theme_Munch
