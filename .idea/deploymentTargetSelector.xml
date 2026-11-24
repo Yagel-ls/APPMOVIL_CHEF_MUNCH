@@ -4,6 +4,7 @@
     <selectionStates>
       <SelectionState runConfigName="app">
         <option name="selectionMode" value="DROPDOWN" />
+<<<<<<< HEAD
         <DialogSelection />
       </SelectionState>
       <SelectionState runConfigName="unitTest">
@@ -17,6 +18,8 @@
       <SelectionState runConfigName="androidTest">
         <option name="selectionMode" value="DROPDOWN" />
         <DialogSelection />
+=======
+>>>>>>> 724e4bdb793399d86ea9bb41aafc894269ddd1a3
       </SelectionState>
     </selectionStates>
   </component>
