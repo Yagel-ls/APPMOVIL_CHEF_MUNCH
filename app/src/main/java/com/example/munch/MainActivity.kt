@@ -16,6 +16,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,10 +30,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -39,6 +45,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.example.munch.ui.theme.MunchTheme
+import com.google.firebase.firestore.FirebaseFirestore
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -48,6 +55,15 @@ private val Crema = Color(0xFFFFF8ED)
 private val Coral = Color(0xFFD95740)
 private val Verde = Color(0xFF486039)
 private val Texto = Color(0xFF30271F)
+
+@Composable
+fun LogoMunch(modifier: Modifier = Modifier, size: Dp = 80.dp) {
+    Image(
+        painter = painterResource(id = R.drawable.ic_munch_logo),
+        contentDescription = "Logo Munch",
+        modifier = modifier.size(size)
+    )
+}
 
 data class MensajeChat(
     val remitente: String,
@@ -69,6 +85,7 @@ data class Pedido(
     var comprobanteUri: String? = null,
     var pagoAutorizado: Boolean = false,
     var videoDesbloqueadoPorQr: Boolean = false,
+    val clienteEmail: String = "cliente@munch.com",
     val chatMensajes: MutableList<MensajeChat> = mutableStateListOf(
         MensajeChat("Cliente", "Hola, por favor avísame cuando vayas en camino.", "12:30")
     )
@@ -76,10 +93,12 @@ data class Pedido(
 
 data class RepartidorItem(
     val nombre: String,
+    val email: String = "driver@munch.com",
     val vehiculo: String,
     val placa: String,
     val telefono: String,
-    val calificacion: Double
+    val calificacion: Double = 5.0,
+    var activo: Boolean = true
 )
 
 data class Kit(
@@ -94,8 +113,233 @@ data class Kit(
     val utensilios: String,
     val videoUrl: String,
     var disponible: Boolean = true,
-    var precio: Int = 350
+    var precio: Int = 350,
+    val iconoEmoji: String = "🍲"
 )
+
+fun Pedido.toMap(): Map<String, Any?> {
+    return mapOf(
+        "id" to id,
+        "kitNombre" to kitNombre,
+        "platillo" to platillo,
+        "porciones" to porciones,
+        "preferencias" to preferencias,
+        "direccion" to direccion,
+        "fecha" to fecha,
+        "horario" to horario,
+        "metodoPago" to metodoPago,
+        "estado" to estado,
+        "comprobanteUri" to comprobanteUri,
+        "pagoAutorizado" to pagoAutorizado,
+        "videoDesbloqueadoPorQr" to videoDesbloqueadoPorQr,
+        "clienteEmail" to clienteEmail,
+        "chatMensajes" to chatMensajes.map { mapOf("remitente" to it.remitente, "texto" to it.texto, "hora" to it.hora) }
+    )
+}
+
+fun mapToPedido(data: Map<String, Any?>): Pedido? {
+    val id = data["id"] as? String ?: return null
+    val kitNombre = data["kitNombre"] as? String ?: ""
+    val platillo = data["platillo"] as? String ?: ""
+    val porciones = (data["porciones"] as? Long)?.toInt() ?: 1
+    val preferencias = data["preferencias"] as? String ?: ""
+    val direccion = data["direccion"] as? String ?: ""
+    val fecha = data["fecha"] as? String ?: ""
+    val horario = data["horario"] as? String ?: ""
+    val metodoPago = data["metodoPago"] as? String ?: ""
+    val estado = data["estado"] as? String ?: "Pendiente"
+    val comprobanteUri = data["comprobanteUri"] as? String
+    val pagoAutorizado = data["pagoAutorizado"] as? Boolean ?: false
+    val videoDesbloqueadoPorQr = data["videoDesbloqueadoPorQr"] as? Boolean ?: false
+    val clienteEmail = data["clienteEmail"] as? String ?: "cliente@munch.com"
+
+    val chatListRaw = data["chatMensajes"] as? List<Map<String, Any?>> ?: emptyList()
+    val chatMensajes = chatListRaw.mapNotNull { m ->
+        val rem = m["remitente"] as? String ?: "Cliente"
+        val txt = m["texto"] as? String ?: ""
+        val hr = m["hora"] as? String ?: ""
+        MensajeChat(rem, txt, hr)
+    }
+
+    return Pedido(
+        id = id,
+        kitNombre = kitNombre,
+        platillo = platillo,
+        porciones = porciones,
+        preferencias = preferencias,
+        direccion = direccion,
+        fecha = fecha,
+        horario = horario,
+        metodoPago = metodoPago,
+        estado = estado,
+        comprobanteUri = comprobanteUri,
+        pagoAutorizado = pagoAutorizado,
+        videoDesbloqueadoPorQr = videoDesbloqueadoPorQr,
+        clienteEmail = clienteEmail,
+        chatMensajes = mutableStateListOf(*chatMensajes.toTypedArray())
+    )
+}
+
+fun Kit.toMap(): Map<String, Any?> {
+    return mapOf(
+        "nombre" to nombre,
+        "subtitulo" to subtitulo,
+        "platillo" to platillo,
+        "minutos" to minutos,
+        "personas" to personas,
+        "porcionesIniciales" to porcionesIniciales,
+        "fondo" to fondo.toArgb(),
+        "ingredientes" to ingredientes,
+        "utensilios" to utensilios,
+        "videoUrl" to videoUrl,
+        "disponible" to disponible,
+        "precio" to precio,
+        "iconoEmoji" to iconoEmoji
+    )
+}
+
+fun mapToKit(data: Map<String, Any?>): Kit? {
+    val nombre = data["nombre"] as? String ?: return null
+    val subtitulo = data["subtitulo"] as? String ?: ""
+    val platillo = data["platillo"] as? String ?: ""
+    val minutos = (data["minutos"] as? Long)?.toInt() ?: 15
+    val personas = data["personas"] as? String ?: "2 personas"
+    val porcionesIniciales = (data["porcionesIniciales"] as? Long)?.toInt() ?: 2
+    val fondoColor = (data["fondo"] as? Long)?.toInt() ?: 0xFFFBE1D5.toInt()
+    val ingredientes = data["ingredientes"] as? String ?: ""
+    val utensilios = data["utensilios"] as? String ?: ""
+    val videoUrl = data["videoUrl"] as? String ?: ""
+    val disponible = data["disponible"] as? Boolean ?: true
+    val precio = (data["precio"] as? Long)?.toInt() ?: 350
+    val iconoEmoji = data["iconoEmoji"] as? String ?: "🍲"
+
+    return Kit(
+        nombre = nombre,
+        subtitulo = subtitulo,
+        platillo = platillo,
+        minutos = minutos,
+        personas = personas,
+        porcionesIniciales = porcionesIniciales,
+        fondo = Color(fondoColor),
+        ingredientes = ingredientes,
+        utensilios = utensilios,
+        videoUrl = videoUrl,
+        disponible = disponible,
+        precio = precio,
+        iconoEmoji = iconoEmoji
+    )
+}
+
+fun guardarPedidoEnFirestore(pedido: Pedido) {
+    try {
+        FirebaseFirestore.getInstance()
+            .collection("pedidos")
+            .document(pedido.id)
+            .set(pedido.toMap())
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun guardarKitEnFirestore(kit: Kit) {
+    try {
+        FirebaseFirestore.getInstance()
+            .collection("kits")
+            .document(kit.nombre)
+            .set(kit.toMap())
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun actualizarPedidoEnListaYFirestore(pedidos: MutableList<Pedido>, pedidoActualizado: Pedido) {
+    val index = pedidos.indexOfFirst { it.id == pedidoActualizado.id }
+    if (index != -1) {
+        pedidos[index] = pedidoActualizado
+    }
+    guardarPedidoEnFirestore(pedidoActualizado)
+}
+
+fun actualizarKitEnListaYFirestore(kits: MutableList<Kit>, kitActualizado: Kit) {
+    val index = kits.indexOfFirst { it.nombre.equals(kitActualizado.nombre, ignoreCase = true) }
+    if (index != -1) {
+        kits[index] = kitActualizado
+    }
+    guardarKitEnFirestore(kitActualizado)
+}
+
+fun eliminarKitEnFirestore(nombreKit: String) {
+    try {
+        FirebaseFirestore.getInstance()
+            .collection("kits")
+            .document(nombreKit)
+            .delete()
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun RepartidorItem.toMap(): Map<String, Any?> {
+    return mapOf(
+        "nombre" to nombre,
+        "email" to email,
+        "vehiculo" to vehiculo,
+        "placa" to placa,
+        "telefono" to telefono,
+        "calificacion" to calificacion,
+        "activo" to activo
+    )
+}
+
+fun mapToRepartidor(data: Map<String, Any?>): RepartidorItem? {
+    val nombre = data["nombre"] as? String ?: return null
+    val email = data["email"] as? String ?: "driver@munch.com"
+    val vehiculo = data["vehiculo"] as? String ?: ""
+    val placa = data["placa"] as? String ?: ""
+    val telefono = data["telefono"] as? String ?: ""
+    val calificacion = (data["calificacion"] as? Double) ?: ((data["calificacion"] as? Long)?.toDouble() ?: 5.0)
+    val activo = data["activo"] as? Boolean ?: true
+
+    return RepartidorItem(
+        nombre = nombre,
+        email = email,
+        vehiculo = vehiculo,
+        placa = placa,
+        telefono = telefono,
+        calificacion = calificacion,
+        activo = activo
+    )
+}
+
+fun guardarRepartidorEnFirestore(repartidor: RepartidorItem) {
+    try {
+        FirebaseFirestore.getInstance()
+            .collection("repartidores")
+            .document(repartidor.nombre)
+            .set(repartidor.toMap())
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun eliminarRepartidorEnFirestore(nombreRepartidor: String) {
+    try {
+        FirebaseFirestore.getInstance()
+            .collection("repartidores")
+            .document(nombreRepartidor)
+            .delete()
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun actualizarRepartidorEnListaYFirestore(repartidores: MutableList<RepartidorItem>, repartidorActualizado: RepartidorItem) {
+    val index = repartidores.indexOfFirst { it.nombre.equals(repartidorActualizado.nombre, ignoreCase = true) }
+    if (index != -1) {
+        repartidores[index] = repartidorActualizado
+    }
+    guardarRepartidorEnFirestore(repartidorActualizado)
+}
 
 private fun textoPorciones(cantidad: Int): String =
     if (cantidad == 1) "1 persona" else "$cantidad personas"
@@ -116,85 +360,159 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MunchApp() {
     var rol by rememberSaveable { mutableStateOf("login") }
+    var emailUsuarioActivo by rememberSaveable { mutableStateOf("cliente@munch.com") }
 
-    val kitsCompartidos = remember {
-        mutableStateListOf(
-            Kit(
-                nombre = "Date Night",
-                subtitulo = "Cena romántica para dos",
-                platillo = "Pasta cremosa de champiñones",
-                minutos = 15,
-                personas = "2 personas",
-                porcionesIniciales = 2,
-                fondo = Color(0xFFFBE1D5),
-                ingredientes = "Pasta artesanal, salsa cremosa de trufa, queso parmesano y especias finas.",
-                utensilios = "Olla, sartén, colador y espátula.",
-                videoUrl = "android.resource://com.example.munch/raw/pasta",
-                disponible = true,
-                precio = 350
-            ),
-            Kit(
-                nombre = "Family",
-                subtitulo = "Comida familiar inolvidable",
-                platillo = "Pizza artesanal para armar",
-                minutos = 25,
-                personas = "3-4 personas",
-                porcionesIniciales = 4,
-                fondo = Color(0xFFE5ECD7),
-                ingredientes = "Masa madre, salsa pomodoro italiana, queso mozzarella y albahaca fresca.",
-                utensilios = "Horno y charola para hornear.",
-                videoUrl = "android.resource://com.example.munch/raw/pizza",
-                disponible = true,
-                precio = 420
-            ),
-            Kit(
-                nombre = "Friends (Snacks)",
-                subtitulo = "Ideal para compartir",
-                platillo = "Tacos al pastor",
-                minutos = 20,
-                personas = "4-6 personas",
-                porcionesIniciales = 6,
-                fondo = Color(0xFFFFEDC3),
-                ingredientes = "Tortillas de maíz nixtamalizado, carne al pastor marinada, piña, cilantro y cebolla.",
-                utensilios = "Sartén, tabla y cuchillo.",
-                videoUrl = "android.resource://com.example.munch/raw/tacos",
-                disponible = true,
-                precio = 390
-            )
-        )
-    }
+    val kitsCompartidos = remember { mutableStateListOf<Kit>() }
+    val pedidosCompartidos = remember { mutableStateListOf<Pedido>() }
+    val repartidoresCompartidos = remember { mutableStateListOf<RepartidorItem>() }
 
-    val pedidosCompartidos = remember {
-        mutableStateListOf(
-            Pedido(
-                id = "MUNCH-6018",
-                kitNombre = "Date Night",
-                platillo = "Pasta cremosa de champiñones",
-                porciones = 2,
-                preferencias = "Sin cebolla",
-                direccion = "Av. Insurgentes Sur 1234, CDMX",
-                fecha = "Hoy",
-                horario = "14:00-16:00",
-                metodoPago = "Transferencia bancaria",
-                estado = "En camino",
-                comprobanteUri = "content://comprobante_ejemplo.jpg",
-                pagoAutorizado = true
-            ),
-            Pedido(
-                id = "MUNCH-3466",
-                kitNombre = "Family",
-                platillo = "Pizza artesanal para armar",
-                porciones = 4,
-                preferencias = "Extra queso",
-                direccion = "Reforma 222, Col. Juárez, CDMX",
-                fecha = "29/10/2026",
-                horario = "12:00-14:00",
-                metodoPago = "Efectivo contra entrega",
-                estado = "Entregado",
-                pagoAutorizado = false,
-                videoDesbloqueadoPorQr = true
-            )
-        )
+    DisposableEffect(Unit) {
+        val db = FirebaseFirestore.getInstance()
+
+        val listenerKits = db.collection("kits").addSnapshotListener { snapshot, error ->
+            if (error == null && snapshot != null) {
+                if (snapshot.isEmpty) {
+                    val iniciales = listOf(
+                        Kit(
+                            nombre = "Date Night",
+                            subtitulo = "Cena romántica para dos",
+                            platillo = "Pasta cremosa de champiñones",
+                            minutos = 15,
+                            personas = "2 personas",
+                            porcionesIniciales = 2,
+                            fondo = Color(0xFFFBE1D5),
+                            ingredientes = "Pasta artesanal, salsa cremosa de trufa, queso parmesano y especias finas.",
+                            utensilios = "Olla, sartén, colador y espátula.",
+                            videoUrl = "android.resource://com.example.munch/raw/pasta",
+                            disponible = true,
+                            precio = 350
+                        ),
+                        Kit(
+                            nombre = "Family",
+                            subtitulo = "Comida familiar inolvidable",
+                            platillo = "Pizza artesanal para armar",
+                            minutos = 25,
+                            personas = "3-4 personas",
+                            porcionesIniciales = 4,
+                            fondo = Color(0xFFE5ECD7),
+                            ingredientes = "Masa madre, salsa pomodoro italiana, queso mozzarella y albahaca fresca.",
+                            utensilios = "Horno y charola para hornear.",
+                            videoUrl = "android.resource://com.example.munch/raw/pizza",
+                            disponible = true,
+                            precio = 420
+                        ),
+                        Kit(
+                            nombre = "Friends (Snacks)",
+                            subtitulo = "Ideal para compartir",
+                            platillo = "Tacos al pastor",
+                            minutos = 20,
+                            personas = "4-6 personas",
+                            porcionesIniciales = 6,
+                            fondo = Color(0xFFFFEDC3),
+                            ingredientes = "Tortillas de maíz nixtamalizado, carne al pastor marinada, piña, cilantro y cebolla.",
+                            utensilios = "Sartén, tabla y cuchillo.",
+                            videoUrl = "android.resource://com.example.munch/raw/tacos",
+                            disponible = true,
+                            precio = 390
+                        )
+                    )
+                    iniciales.forEach { guardarKitEnFirestore(it) }
+                } else {
+                    val listaKitsActualizada = snapshot.documents.mapNotNull { doc ->
+                        doc.data?.let { mapToKit(it) }
+                    }
+                    kitsCompartidos.clear()
+                    kitsCompartidos.addAll(listaKitsActualizada)
+                }
+            }
+        }
+
+        val listenerPedidos = db.collection("pedidos").addSnapshotListener { snapshot, error ->
+            if (error == null && snapshot != null) {
+                if (snapshot.isEmpty) {
+                    val iniciales = listOf(
+                        Pedido(
+                            id = "MUNCH-6018",
+                            kitNombre = "Date Night",
+                            platillo = "Pasta cremosa de champiñones",
+                            porciones = 2,
+                            preferencias = "Sin cebolla",
+                            direccion = "Av. Insurgentes Sur 1234, CDMX",
+                            fecha = "Hoy",
+                            horario = "14:00-16:00",
+                            metodoPago = "Transferencia bancaria",
+                            estado = "En camino",
+                            comprobanteUri = "content://comprobante_ejemplo.jpg",
+                            pagoAutorizado = true,
+                            clienteEmail = "cliente@munch.com"
+                        ),
+                        Pedido(
+                            id = "MUNCH-3466",
+                            kitNombre = "Family",
+                            platillo = "Pizza artesanal para armar",
+                            porciones = 4,
+                            preferencias = "Extra queso",
+                            direccion = "Reforma 222, Col. Juárez, CDMX",
+                            fecha = "29/10/2026",
+                            horario = "12:00-14:00",
+                            metodoPago = "Efectivo contra entrega",
+                            estado = "Entregado",
+                            pagoAutorizado = false,
+                            videoDesbloqueadoPorQr = true,
+                            clienteEmail = "cliente@munch.com"
+                        )
+                    )
+                    iniciales.forEach { guardarPedidoEnFirestore(it) }
+                } else {
+                    val listaActualizada = snapshot.documents.mapNotNull { doc ->
+                        doc.data?.let { mapToPedido(it) }
+                    }.sortedByDescending { it.id }
+
+                    pedidosCompartidos.clear()
+                    pedidosCompartidos.addAll(listaActualizada)
+                }
+            }
+        }
+
+        val listenerRepartidores = db.collection("repartidores").addSnapshotListener { snapshot, error ->
+            if (error == null && snapshot != null) {
+                if (snapshot.isEmpty) {
+                    val iniciales = listOf(
+                        RepartidorItem(
+                            nombre = "Carlos Rodríguez",
+                            email = "driver@munch.com",
+                            vehiculo = "Motoneta Itálica 125cc",
+                            placa = "45ABC",
+                            telefono = "5512345678",
+                            calificacion = 5.0,
+                            activo = true
+                        ),
+                        RepartidorItem(
+                            nombre = "Luis Morales",
+                            email = "luis@munch.com",
+                            vehiculo = "Honda Cargo 150",
+                            placa = "89XYZ",
+                            telefono = "5598765432",
+                            calificacion = 4.8,
+                            activo = false
+                        )
+                    )
+                    iniciales.forEach { guardarRepartidorEnFirestore(it) }
+                } else {
+                    val listaActualizada = snapshot.documents.mapNotNull { doc ->
+                        doc.data?.let { mapToRepartidor(it) }
+                    }
+                    repartidoresCompartidos.clear()
+                    repartidoresCompartidos.addAll(listaActualizada)
+                }
+            }
+        }
+
+        onDispose {
+            listenerKits.remove()
+            listenerPedidos.remove()
+            listenerRepartidores.remove()
+        }
     }
 
     Surface(modifier = Modifier.fillMaxSize().statusBarsPadding(), color = Crema) {
@@ -205,12 +523,16 @@ fun MunchApp() {
                 "login" -> {
                     PantallaLogin(
                         modifier = modificador,
-                        onLoginSuccess = { nuevoRol -> rol = nuevoRol }
+                        onLoginSuccess = { nuevoRol, emailIngresado ->
+                            emailUsuarioActivo = emailIngresado
+                            rol = nuevoRol
+                        }
                     )
                 }
                 "cliente" -> {
                     MunchClienteFlow(
                         modifier = modificador,
+                        clienteEmail = emailUsuarioActivo,
                         kits = kitsCompartidos,
                         pedidosCompartidos = pedidosCompartidos,
                         alCerrarSesion = { rol = "login" }
@@ -220,13 +542,16 @@ fun MunchApp() {
                     PantallaChef(
                         modifier = modificador,
                         pedidos = pedidosCompartidos,
+                        repartidores = repartidoresCompartidos,
                         alCerrarSesion = { rol = "login" }
                     )
                 }
                 "driver" -> {
                     PantallaDriver(
                         modifier = modificador,
+                        driverEmail = emailUsuarioActivo,
                         pedidos = pedidosCompartidos,
+                        repartidores = repartidoresCompartidos,
                         alCerrarSesion = { rol = "login" }
                     )
                 }
@@ -235,6 +560,7 @@ fun MunchApp() {
                         modifier = modificador,
                         kits = kitsCompartidos,
                         pedidos = pedidosCompartidos,
+                        repartidores = repartidoresCompartidos,
                         alCerrarSesion = { rol = "login" }
                     )
                 }
@@ -245,11 +571,14 @@ fun MunchApp() {
 
 @Composable
 private fun PantallaLogin(
-    onLoginSuccess: (String) -> Unit,
+    onLoginSuccess: (String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var email by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
+    var esRegistro by rememberSaveable { mutableStateOf(false) }
+    var nombre by rememberSaveable { mutableStateOf("") }
+    var email by rememberSaveable { mutableStateOf("cliente@munch.com") }
+    var password by rememberSaveable { mutableStateOf("cliente123") }
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
     var errorMsg by rememberSaveable { mutableStateOf("") }
 
     Column(
@@ -260,10 +589,30 @@ private fun PantallaLogin(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        LogoMunch(size = 90.dp)
+        Spacer(Modifier.height(8.dp))
         Text(text = "Munch", color = Coral, fontSize = 42.sp, fontWeight = FontWeight.Black)
-        Text(text = "Plataforma de Kits Culinarios", color = Verde, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text(
+            text = if (esRegistro) "Registro de Nuevo Cliente" else "Plataforma de Kits Culinarios",
+            color = Verde,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium
+        )
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(24.dp))
+
+        if (esRegistro) {
+            OutlinedTextField(
+                value = nombre,
+                onValueChange = { nombre = it; errorMsg = "" },
+                label = { Text("Nombre completo") },
+                placeholder = { Text("ej. Ana García") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                singleLine = true
+            )
+            Spacer(Modifier.height(12.dp))
+        }
 
         OutlinedTextField(
             value = email,
@@ -275,7 +624,7 @@ private fun PantallaLogin(
             singleLine = true
         )
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
         OutlinedTextField(
             value = password,
@@ -288,72 +637,151 @@ private fun PantallaLogin(
             visualTransformation = PasswordVisualTransformation()
         )
 
+        if (esRegistro) {
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = confirmPassword,
+                onValueChange = { confirmPassword = it; errorMsg = "" },
+                label = { Text("Confirmar contraseña") },
+                placeholder = { Text("••••••") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation()
+            )
+        }
+
         if (errorMsg.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
             Text(text = errorMsg, color = Coral, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
 
         Button(
             onClick = {
                 val e = email.trim().lowercase()
                 val p = password.trim()
-                when {
-                    e == "cliente@munch.com" && p == "cliente123" -> onLoginSuccess("cliente")
-                    e == "chef@munch.com" && p == "chef123" -> onLoginSuccess("chef")
-                    e == "driver@munch.com" && p == "driver123" -> onLoginSuccess("driver")
-                    e == "admin@munch.com" && p == "admin123" -> onLoginSuccess("admin")
-                    else -> errorMsg = "Credenciales incorrectas. Verifique su rol y contraseña."
+                if (esRegistro) {
+                    if (nombre.isBlank()) {
+                        errorMsg = "Por favor ingresa tu nombre completo."
+                    } else if (!e.contains("@") || !e.contains(".")) {
+                        errorMsg = "Ingresa un correo electrónico válido."
+                    } else if (p.length < 4) {
+                        errorMsg = "La contraseña debe tener al menos 4 caracteres."
+                    } else if (p != confirmPassword.trim()) {
+                        errorMsg = "Las contraseñas no coinciden."
+                    } else {
+                        try {
+                            FirebaseFirestore.getInstance().collection("usuarios").document(e).get()
+                                .addOnSuccessListener { doc ->
+                                    if (doc != null && doc.exists()) {
+                                        errorMsg = "El correo electrónico '$e' ya se encuentra registrado. Por favor inicia sesión."
+                                    } else {
+                                        val usuarioMap = mapOf(
+                                            "nombre" to nombre.trim(),
+                                            "email" to e,
+                                            "rol" to "cliente",
+                                            "fechaRegistro" to SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
+                                        )
+                                        FirebaseFirestore.getInstance().collection("usuarios").document(e).set(usuarioMap)
+                                        onLoginSuccess("cliente", e)
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    onLoginSuccess("cliente", e)
+                                }
+                        } catch (_: Exception) {
+                            onLoginSuccess("cliente", e)
+                        }
+                    }
+                } else {
+                    when {
+                        e == "cliente@munch.com" && p == "cliente123" -> onLoginSuccess("cliente", e)
+                        e == "chef@munch.com" && p == "chef123" -> onLoginSuccess("chef", e)
+                        e == "driver@munch.com" && p == "driver123" -> onLoginSuccess("driver", e)
+                        e == "admin@munch.com" && p == "admin123" -> onLoginSuccess("admin", e)
+                        e.isNotBlank() && p.isNotBlank() -> onLoginSuccess("cliente", e)
+                        else -> errorMsg = "Credenciales incorrectas. Verifique su correo y contraseña."
+                    }
                 }
             },
             modifier = Modifier.fillMaxWidth().height(50.dp),
             shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Coral)
         ) {
-            Text("Iniciar sesión", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = if (esRegistro) "Crear cuenta de cliente" else "Iniciar sesión",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
 
-        Spacer(Modifier.height(24.dp))
-
-        Text("Acceso rápido por rol:", fontSize = 13.sp, color = Verde, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
 
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = { email = "cliente@munch.com"; password = "cliente123"; errorMsg = "" },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = Verde),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Cliente", fontSize = 12.sp)
+        TextButton(onClick = {
+            esRegistro = !esRegistro
+            errorMsg = ""
+            if (esRegistro) {
+                nombre = ""
+                email = ""
+                password = ""
+                confirmPassword = ""
+            } else {
+                email = "cliente@munch.com"
+                password = "cliente123"
             }
-            Button(
-                onClick = { email = "chef@munch.com"; password = "chef123"; errorMsg = "" },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = Verde),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Chef", fontSize = 12.sp)
-            }
+        }) {
+            Text(
+                text = if (esRegistro) "¿Ya tienes cuenta? Inicia sesión aquí" else "¿No tienes cuenta? Regístrate como cliente",
+                color = Verde,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp
+            )
         }
-        Spacer(Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = { email = "driver@munch.com"; password = "driver123"; errorMsg = "" },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = Verde),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Driver", fontSize = 12.sp)
+
+        if (!esRegistro) {
+            Spacer(Modifier.height(16.dp))
+            Text("Acceso rápido por rol (Demo):", fontSize = 13.sp, color = Verde, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(12.dp))
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { email = "cliente@munch.com"; password = "cliente123"; errorMsg = "" },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Verde),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Cliente", fontSize = 12.sp)
+                }
+                Button(
+                    onClick = { email = "chef@munch.com"; password = "chef123"; errorMsg = "" },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Verde),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Chef", fontSize = 12.sp)
+                }
             }
-            Button(
-                onClick = { email = "admin@munch.com"; password = "admin123"; errorMsg = "" },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = Verde),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Admin", fontSize = 12.sp)
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { email = "driver@munch.com"; password = "driver123"; errorMsg = "" },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Verde),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Driver", fontSize = 12.sp)
+                }
+                Button(
+                    onClick = { email = "admin@munch.com"; password = "admin123"; errorMsg = "" },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Verde),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Admin", fontSize = 12.sp)
+                }
             }
         }
     }
@@ -362,6 +790,7 @@ private fun PantallaLogin(
 @Composable
 private fun MunchClienteFlow(
     modifier: Modifier = Modifier,
+    clienteEmail: String,
     kits: List<Kit>,
     pedidosCompartidos: MutableList<Pedido>,
     alCerrarSesion: () -> Unit
@@ -452,11 +881,12 @@ private fun MunchClienteFlow(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     TituloPantalla("Mis Pedidos 🧾")
-                    Text("Seguimiento en vivo, estatus de pago y comunicación con el repartidor", color = Verde, fontSize = 13.sp)
+                    Text("Cliente: $clienteEmail", color = Verde, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
                     TituloSeccion("Pedidos Activos")
-                    val activos = pedidosCompartidos.filter { it.estado != "Entregado" }
-                    val anteriores = pedidosCompartidos.filter { it.estado == "Entregado" }
+                    val misPedidos = pedidosCompartidos.filter { it.clienteEmail.equals(clienteEmail, ignoreCase = true) }
+                    val activos = misPedidos.filter { it.estado != "Entregado" }
+                    val anteriores = misPedidos.filter { it.estado == "Entregado" }
 
                     if (activos.isEmpty()) {
                         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFFBE1D5))) {
@@ -614,23 +1044,23 @@ private fun MunchClienteFlow(
                         alConfirmar = {
                             val nuevoId = "MUNCH-${System.currentTimeMillis() % 10000}"
                             numeroPedido = nuevoId
-                            pedidosCompartidos.add(
-                                0,
-                                Pedido(
-                                    id = nuevoId,
-                                    kitNombre = kit.nombre,
-                                    platillo = kit.platillo,
-                                    porciones = porciones,
-                                    preferencias = preferencias,
-                                    direccion = direccion,
-                                    fecha = fecha.ifBlank { "Hoy" },
-                                    horario = horario.ifBlank { "14:00" },
-                                    metodoPago = metodoPago,
-                                    estado = "Pendiente",
-                                    comprobanteUri = comprobanteUri,
-                                    pagoAutorizado = !metodoPago.contains("Transferencia")
-                                )
+                            val nuevoPedidoObj = Pedido(
+                                id = nuevoId,
+                                kitNombre = kit.nombre,
+                                platillo = kit.platillo,
+                                porciones = porciones,
+                                preferencias = preferencias,
+                                direccion = direccion,
+                                fecha = fecha.ifBlank { "Hoy" },
+                                horario = horario.ifBlank { "14:00" },
+                                metodoPago = metodoPago,
+                                estado = "Pendiente",
+                                comprobanteUri = comprobanteUri,
+                                pagoAutorizado = !metodoPago.contains("Transferencia"),
+                                clienteEmail = clienteEmail
                             )
+                            pedidosCompartidos.add(0, nuevoPedidoObj)
+                            guardarPedidoEnFirestore(nuevoPedidoObj)
                             pantalla = 4
                         }
                     )
@@ -660,74 +1090,20 @@ private fun MunchClienteFlow(
 
     if (pedidoChatClienteActivo != null) {
         val pedidoActual = pedidoChatClienteActivo!!
-        var textoMensaje by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { pedidoChatClienteActivo = null },
-            containerColor = Crema,
-            title = { Column { Text("Chat con repartidor", fontWeight = FontWeight.Bold, color = Verde, fontSize = 18.sp); Text("Pedido #${pedidoActual.id}", fontSize = 13.sp, color = Texto.copy(alpha = 0.7f)) } },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth().height(340.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    pedidoActual.chatMensajes.forEach { msg ->
-                        val esCliente = msg.remitente == "Cliente"
-                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = if (esCliente) Alignment.CenterEnd else Alignment.CenterStart) {
-                            Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = if (esCliente) Coral else Color.White), modifier = Modifier.widthIn(max = 260.dp)) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text(text = "${msg.remitente} • ${msg.hora}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (esCliente) Color.White.copy(alpha = 0.8f) else Verde)
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(text = msg.texto, fontSize = 14.sp, color = if (esCliente) Color.White else Texto)
-                                }
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text("Mensajes rápidos:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Verde)
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("¿Cuánto tardas?", "Aquí estoy atento").forEach { autoMsg ->
-                            AssistChip(onClick = { val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()); pedidoActual.chatMensajes.add(MensajeChat("Cliente", autoMsg, time)) }, label = { Text(autoMsg, fontSize = 11.sp) })
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = textoMensaje,
-                        onValueChange = { textoMensaje = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Escribe un mensaje al repartidor...") },
-                        trailingIcon = {
-                            val speechLauncher = rememberLauncherForActivityResult(
-                                contract = ActivityResultContracts.StartActivityForResult()
-                            ) { result ->
-                                if (result.resultCode == Activity.RESULT_OK) {
-                                    val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                                    val spokenText = matches?.getOrNull(0)
-                                    if (!spokenText.isNullOrBlank()) {
-                                        val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-                                        pedidoActual.chatMensajes.add(MensajeChat("Cliente", spokenText, time))
-                                    }
-                                }
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = {
-                                    try {
-                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-MX")
-                                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Habla tu mensaje...")
-                                        }
-                                        speechLauncher.launch(intent)
-                                    } catch (_: Exception) {
-                                        val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-                                        pedidoActual.chatMensajes.add(MensajeChat("Cliente", "Hola, aquí espero.", time))
-                                    }
-                                }) { Text("🎙️ Voz", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Verde) }
-                                IconButton(onClick = { if (textoMensaje.isNotBlank()) { val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()); pedidoActual.chatMensajes.add(MensajeChat("Cliente", textoMensaje, time)); textoMensaje = "" } }) { Text("Enviar", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Coral) }
-                            }
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        maxLines = 2
-                    )
-                }
+        VentanaChatDialog(
+            titulo = "Chat con repartidor",
+            subtitulo = "Pedido #${pedidoActual.id}",
+            esEmisorCliente = true,
+            mensajes = pedidoActual.chatMensajes,
+            mensajesRapidos = listOf("¿Cuánto tardas?", "Aquí estoy atento", "En la puerta del domicilio"),
+            alEnviarMensaje = { texto ->
+                val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                val nuevosMensajes = pedidoActual.chatMensajes.toMutableList().apply { add(MensajeChat("Cliente", texto, time)) }
+                val pedidoActualizado = pedidoActual.copy(chatMensajes = mutableStateListOf(*nuevosMensajes.toTypedArray()))
+                actualizarPedidoEnListaYFirestore(pedidosCompartidos, pedidoActualizado)
+                pedidoChatClienteActivo = pedidoActualizado
             },
-            confirmButton = { TextButton(onClick = { pedidoChatClienteActivo = null }) { Text("Cerrar", color = Coral, fontWeight = FontWeight.Bold) } }
+            alCerrar = { pedidoChatClienteActivo = null }
         )
     }
 
@@ -924,7 +1300,7 @@ private fun TarjetaKit(kit: Kit, alPulsar: () -> Unit) {
     var presionado by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (presionado) 0.97f else 1f, label = "scale")
 
-    val emojiGrande = when {
+    val emojiGrande = if (kit.iconoEmoji.isNotBlank()) kit.iconoEmoji else when {
         kit.nombre.contains("Date", ignoreCase = true) -> "🍝"
         kit.nombre.contains("Family", ignoreCase = true) -> "🍕"
         else -> "🌮"
@@ -1334,6 +1710,199 @@ private fun BotonVolver(alPulsar: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VentanaChatDialog(
+    titulo: String,
+    subtitulo: String,
+    esEmisorCliente: Boolean,
+    mensajes: List<MensajeChat>,
+    mensajesRapidos: List<String>,
+    alEnviarMensaje: (String) -> Unit,
+    alCerrar: () -> Unit
+) {
+    var textoMensaje by remember { mutableStateOf("") }
+    val miRol = if (esEmisorCliente) "Cliente" else "Driver"
+    val scrollState = rememberScrollState()
+
+    LaunchedEffect(mensajes.size) {
+        scrollState.animateScrollTo(scrollState.maxValue)
+    }
+
+    val speechLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val spokenText = matches?.getOrNull(0)
+            if (!spokenText.isNullOrBlank()) {
+                alEnviarMensaje(spokenText)
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = alCerrar,
+        modifier = Modifier
+            .fillMaxWidth(0.95f)
+            .padding(vertical = 12.dp),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        containerColor = Crema,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = titulo, fontWeight = FontWeight.Bold, color = Verde, fontSize = 18.sp)
+                    Text(text = subtitulo, fontSize = 12.sp, color = Texto.copy(alpha = 0.7f))
+                }
+                IconButton(onClick = alCerrar) {
+                    Text("✕", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Coral)
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                HorizontalDivider(color = Texto.copy(alpha = 0.1f))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 160.dp, max = 260.dp)
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (mensajes.isEmpty()) {
+                        Text(
+                            "Inicia la conversación...",
+                            fontSize = 13.sp,
+                            color = Texto.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(vertical = 16.dp)
+                        )
+                    } else {
+                        mensajes.forEach { msg ->
+                            val esMio = msg.remitente == miRol
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = if (esMio) Alignment.CenterEnd else Alignment.CenterStart
+                            ) {
+                                Card(
+                                    shape = RoundedCornerShape(
+                                        topStart = 16.dp,
+                                        topEnd = 16.dp,
+                                        bottomStart = if (esMio) 16.dp else 4.dp,
+                                        bottomEnd = if (esMio) 4.dp else 16.dp
+                                    ),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (esMio) Coral else Color.White
+                                    ),
+                                    modifier = Modifier.widthIn(max = 260.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                        Text(
+                                            text = "${msg.remitente} • ${msg.hora}",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (esMio) Color.White.copy(alpha = 0.85f) else Verde
+                                        )
+                                        Spacer(Modifier.height(2.dp))
+                                        Text(
+                                            text = msg.texto,
+                                            fontSize = 14.sp,
+                                            color = if (esMio) Color.White else Texto
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = Texto.copy(alpha = 0.1f))
+
+                Text("Respuestas rápidas:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Verde)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    mensajesRapidos.forEach { autoMsg ->
+                        AssistChip(
+                            onClick = { alEnviarMensaje(autoMsg) },
+                            label = { Text(autoMsg, fontSize = 12.sp, fontWeight = FontWeight.Medium) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = Color.White,
+                                labelColor = Texto
+                            )
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedTextField(
+                        value = textoMensaje,
+                        onValueChange = { textoMensaje = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Mensaje...", fontSize = 13.sp) },
+                        shape = RoundedCornerShape(16.dp),
+                        singleLine = true
+                    )
+
+                    IconButton(
+                        onClick = {
+                            try {
+                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-MX")
+                                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Habla tu mensaje...")
+                                }
+                                speechLauncher.launch(intent)
+                            } catch (_: Exception) {
+                                alEnviarMensaje("Hola, aquí atento.")
+                            }
+                        },
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Text("🎙️", fontSize = 18.sp)
+                    }
+
+                    Button(
+                        onClick = {
+                            if (textoMensaje.isNotBlank()) {
+                                alEnviarMensaje(textoMensaje.trim())
+                                textoMensaje = ""
+                            }
+                        },
+                        enabled = textoMensaje.isNotBlank(),
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Coral,
+                            disabledContainerColor = Coral.copy(alpha = 0.4f)
+                        )
+                    ) {
+                        Text("Enviar", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {}
+    )
+}
+
 @Composable
 private fun TituloPantalla(texto: String) {
     Text(text = texto, color = Texto, fontSize = 28.sp, fontWeight = FontWeight.Bold)
@@ -1361,6 +1930,7 @@ private fun BotonPrincipal(texto: String, alPulsar: () -> Unit, habilitado: Bool
 private fun PantallaChef(
     modifier: Modifier = Modifier,
     pedidos: MutableList<Pedido>,
+    repartidores: MutableList<RepartidorItem>,
     alCerrarSesion: () -> Unit
 ) {
     Column(
@@ -1372,6 +1942,42 @@ private fun PantallaChef(
             Text(text = "Chef (chef@munch.com)", color = Verde, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
         TituloPantalla("Cocina y Comandas")
+
+        // Estatus de Repartidores de Turno
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Estatus de Repartidores de Turno 🛵", fontWeight = FontWeight.Bold, color = Verde, fontSize = 14.sp)
+                if (repartidores.isEmpty()) {
+                    Text("No hay repartidores registrados.", fontSize = 12.sp, color = Texto.copy(alpha = 0.7f))
+                } else {
+                    repartidores.forEach { rep ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("${rep.nombre} (${rep.vehiculo})", fontSize = 13.sp, color = Texto, fontWeight = FontWeight.Medium)
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (rep.activo) Color(0xFFE5ECD7) else Color(0xFFFBE1D5)
+                            ) {
+                                Text(
+                                    text = if (rep.activo) "🟢 Activo hoy" else "🔴 Inactivo hoy",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (rep.activo) Verde else Coral,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if (pedidos.isEmpty()) {
             Text("No hay pedidos activos en la cocina.", color = Texto)
         } else {
@@ -1389,9 +1995,13 @@ private fun PantallaChef(
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             if (pedido.estado == "Pendiente") {
-                                Button(onClick = { pedido.estado = "Cocinando" }, colors = ButtonDefaults.buttonColors(containerColor = Verde)) { Text("Iniciar cocina") }
+                                Button(onClick = {
+                                    actualizarPedidoEnListaYFirestore(pedidos, pedido.copy(estado = "Cocinando"))
+                                }, colors = ButtonDefaults.buttonColors(containerColor = Verde)) { Text("Iniciar cocina") }
                             } else if (pedido.estado == "Cocinando") {
-                                Button(onClick = { pedido.estado = "Preparado (En cocina)" }, colors = ButtonDefaults.buttonColors(containerColor = Coral)) { Text("Terminar cocina (Avisar Driver)") }
+                                Button(onClick = {
+                                    actualizarPedidoEnListaYFirestore(pedidos, pedido.copy(estado = "Preparado (En cocina)"))
+                                }, colors = ButtonDefaults.buttonColors(containerColor = Coral)) { Text("Terminar cocina (Avisar Driver)") }
                             } else {
                                 Text(text = "Preparado (Esperando al Driver)", color = Verde, fontWeight = FontWeight.Bold)
                             }
@@ -1406,12 +2016,19 @@ private fun PantallaChef(
 @Composable
 private fun PantallaDriver(
     modifier: Modifier = Modifier,
+    driverEmail: String = "driver@munch.com",
     pedidos: MutableList<Pedido>,
+    repartidores: MutableList<RepartidorItem>,
     alCerrarSesion: () -> Unit
 ) {
     val contexto = LocalContext.current
     var pedidoChatActivo by remember { mutableStateOf<Pedido?>(null) }
     var filtroEstado by remember { mutableStateOf("Todos") }
+
+    val miRepartidor = repartidores.find {
+        it.email.equals(driverEmail, ignoreCase = true) || it.nombre.contains("Carlos", ignoreCase = true)
+    } ?: repartidores.firstOrNull()
+      ?: RepartidorItem("Carlos Rodríguez", driverEmail, "Motoneta Itálica 125cc", "45ABC", "5512345678", 5.0, true)
 
     val abrirGoogleMaps: (String) -> Unit = { direccion ->
         try {
@@ -1432,11 +2049,49 @@ private fun PantallaDriver(
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text(text = "Munch Driver", color = Coral, fontSize = 28.sp, fontWeight = FontWeight.Black)
-                Text(text = "Carlos Rodríguez", color = Texto, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Text(text = "Motoneta Itálica 125cc • Placa 45ABC", color = Verde, fontSize = 12.sp)
+                Text(text = miRepartidor.nombre, color = Texto, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(text = "${miRepartidor.vehiculo} • Placa ${miRepartidor.placa}", color = Verde, fontSize = 12.sp)
             }
             Button(onClick = alCerrarSesion, colors = ButtonDefaults.buttonColors(containerColor = Coral), shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
                 Text("Salir", color = Color.White, fontSize = 13.sp)
+            }
+        }
+
+        // Control de Turno Activo/Inactivo
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = if (miRepartidor.activo) Color(0xFFE5ECD7) else Color(0xFFFBE1D5))
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (miRepartidor.activo) "Turno Activo 🟢" else "Turno Inactivo 🔴",
+                        fontWeight = FontWeight.Bold,
+                        color = if (miRepartidor.activo) Verde else Coral
+                    )
+                    Text(
+                        text = if (miRepartidor.activo) "Disponible para entregas hoy" else "No laborando hoy (Pausado)",
+                        fontSize = 12.sp,
+                        color = Texto.copy(alpha = 0.8f)
+                    )
+                }
+                Button(
+                    onClick = {
+                        val repartidorActualizado = miRepartidor.copy(activo = !miRepartidor.activo)
+                        actualizarRepartidorEnListaYFirestore(repartidores, repartidorActualizado)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (miRepartidor.activo) Coral else Verde
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(if (miRepartidor.activo) "Pausar turno" else "Activar turno")
+                }
             }
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1490,9 +2145,13 @@ private fun PantallaDriver(
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             if (pedido.estado == "Preparado (En cocina)") {
-                                Button(onClick = { pedido.estado = "En camino" }, colors = ButtonDefaults.buttonColors(containerColor = Verde)) { Text("Tomar pedido") }
+                                Button(onClick = {
+                                    actualizarPedidoEnListaYFirestore(pedidos, pedido.copy(estado = "En camino"))
+                                }, colors = ButtonDefaults.buttonColors(containerColor = Verde)) { Text("Tomar pedido") }
                             } else if (pedido.estado == "En camino") {
-                                Button(onClick = { pedido.estado = "Entregado" }, colors = ButtonDefaults.buttonColors(containerColor = Coral)) { Text("Marcar entregado") }
+                                Button(onClick = {
+                                    actualizarPedidoEnListaYFirestore(pedidos, pedido.copy(estado = "Entregado"))
+                                }, colors = ButtonDefaults.buttonColors(containerColor = Coral)) { Text("Marcar entregado") }
                             } else {
                                 Text(
                                     text = if (pedido.estado == "Entregado") "Entregado" else "En proceso",
@@ -1509,79 +2168,20 @@ private fun PantallaDriver(
 
     if (pedidoChatActivo != null) {
         val pedidoActual = pedidoChatActivo!!
-        var textoMensaje by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { pedidoChatActivo = null },
-            containerColor = Crema,
-            title = { Column { Text("Chat en vivo con cliente", fontWeight = FontWeight.Bold, color = Verde, fontSize = 18.sp); Text("Pedido #${pedidoActual.id}", fontSize = 13.sp, color = Texto.copy(alpha = 0.7f)) } },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth().height(340.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    pedidoActual.chatMensajes.forEach { msg ->
-                        val esDriver = msg.remitente == "Driver"
-                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = if (esDriver) Alignment.CenterEnd else Alignment.CenterStart) {
-                            Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = if (esDriver) Coral else Color.White), modifier = Modifier.widthIn(max = 260.dp)) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text(text = "${msg.remitente} • ${msg.hora}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (esDriver) Color.White.copy(alpha = 0.8f) else Verde)
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(text = msg.texto, fontSize = 14.sp, color = if (esDriver) Color.White else Texto)
-                                }
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text("Mensajes rápidos:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Verde)
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("Voy en camino", "Llegué al domicilio").forEach { autoMsg ->
-                            AssistChip(onClick = { val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()); pedidoActual.chatMensajes.add(MensajeChat("Driver", autoMsg, time)) }, label = { Text(autoMsg, fontSize = 11.sp) })
-                        }
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("¿Me ayudas con el timbre?", "A 5 minutos de entrega").forEach { autoMsg ->
-                            AssistChip(onClick = { val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()); pedidoActual.chatMensajes.add(MensajeChat("Driver", autoMsg, time)) }, label = { Text(autoMsg, fontSize = 11.sp) })
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = textoMensaje,
-                        onValueChange = { textoMensaje = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Escribe un mensaje...") },
-                        trailingIcon = {
-                            val speechLauncher = rememberLauncherForActivityResult(
-                                contract = ActivityResultContracts.StartActivityForResult()
-                            ) { result ->
-                                if (result.resultCode == Activity.RESULT_OK) {
-                                    val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                                    val spokenText = matches?.getOrNull(0)
-                                    if (!spokenText.isNullOrBlank()) {
-                                        val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-                                        pedidoActual.chatMensajes.add(MensajeChat("Driver", spokenText, time))
-                                    }
-                                }
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = {
-                                    try {
-                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-MX")
-                                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Habla tu mensaje de voz...")
-                                        }
-                                        speechLauncher.launch(intent)
-                                    } catch (_: Exception) {
-                                        val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-                                        pedidoActual.chatMensajes.add(MensajeChat("Driver", "Hola, ya voy en camino.", time))
-                                    }
-                                }) { Text("Voz", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Verde) }
-                                IconButton(onClick = { if (textoMensaje.isNotBlank()) { val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()); pedidoActual.chatMensajes.add(MensajeChat("Driver", textoMensaje, time)); textoMensaje = "" } }) { Text("Enviar", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Coral) }
-                            }
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        maxLines = 2
-                    )
-                }
+        VentanaChatDialog(
+            titulo = "Chat en vivo con cliente",
+            subtitulo = "Pedido #${pedidoActual.id}",
+            esEmisorCliente = false,
+            mensajes = pedidoActual.chatMensajes,
+            mensajesRapidos = listOf("Voy en camino", "Llegué al domicilio", "¿Me ayudas con el timbre?", "A 5 minutos de entrega"),
+            alEnviarMensaje = { texto ->
+                val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                val nuevosMensajes = pedidoActual.chatMensajes.toMutableList().apply { add(MensajeChat("Driver", texto, time)) }
+                val pedidoActualizado = pedidoActual.copy(chatMensajes = mutableStateListOf(*nuevosMensajes.toTypedArray()))
+                actualizarPedidoEnListaYFirestore(pedidos, pedidoActualizado)
+                pedidoChatActivo = pedidoActualizado
             },
-            confirmButton = { TextButton(onClick = { pedidoChatActivo = null }) { Text("Cerrar", color = Coral, fontWeight = FontWeight.Bold) } }
+            alCerrar = { pedidoChatActivo = null }
         )
     }
 }
@@ -1591,10 +2191,13 @@ private fun PantallaAdmin(
     modifier: Modifier = Modifier,
     kits: MutableList<Kit>,
     pedidos: MutableList<Pedido>,
+    repartidores: MutableList<RepartidorItem>,
     alCerrarSesion: () -> Unit
 ) {
     var adminTab by rememberSaveable { mutableStateOf("Pedidos") }
     var mostrarDialogoNuevoKit by remember { mutableStateOf(false) }
+    var mostrarDialogoNuevoRepartidor by remember { mutableStateOf(false) }
+    var kitAEditar by remember { mutableStateOf<Kit?>(null) }
 
     Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -1645,7 +2248,9 @@ private fun PantallaAdmin(
                                     if (pedido.pagoAutorizado) {
                                         Text(text = "Pago autorizado por administración", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Verde)
                                     } else {
-                                        Button(onClick = { pedido.pagoAutorizado = true }, colors = ButtonDefaults.buttonColors(containerColor = Verde), shape = RoundedCornerShape(10.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                                        Button(onClick = {
+                                            actualizarPedidoEnListaYFirestore(pedidos, pedido.copy(pagoAutorizado = true))
+                                        }, colors = ButtonDefaults.buttonColors(containerColor = Verde), shape = RoundedCornerShape(10.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
                                             Text("Autorizar pago de transferencia", fontSize = 12.sp)
                                         }
                                     }
@@ -1674,10 +2279,20 @@ private fun PantallaAdmin(
                             Text(text = kit.platillo, color = Texto.copy(alpha = 0.8f), fontSize = 14.sp)
                             Text(text = "Precio: \$${kit.precio} MXN | ${kit.porcionesIniciales} personas | ${kit.minutos} min", fontSize = 13.sp, color = Verde)
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { kit.disponible = !kit.disponible }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = if (kit.disponible) Coral else Verde)) {
+                                OutlinedButton(onClick = {
+                                    actualizarKitEnListaYFirestore(kits, kit.copy(disponible = !kit.disponible))
+                                }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = if (kit.disponible) Coral else Verde)) {
                                     Text(if (kit.disponible) "Pausar" else "Activar")
                                 }
-                                OutlinedButton(onClick = { kits.removeAt(index) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Coral)) {
+                                OutlinedButton(onClick = {
+                                    kitAEditar = kit
+                                }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Verde)) {
+                                    Text("Editar")
+                                }
+                                OutlinedButton(onClick = {
+                                    val kitEliminado = kits.removeAt(index)
+                                    eliminarKitEnFirestore(kitEliminado.nombre)
+                                }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Coral)) {
                                     Text("Eliminar")
                                 }
                             }
@@ -1686,10 +2301,41 @@ private fun PantallaAdmin(
                 }
             }
             "Repartidores" -> {
-                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFE2EAF4))) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("Repartidores activos", fontWeight = FontWeight.Bold, color = Texto)
-                        Text("• Carlos Rodríguez (Itálica 125cc • 45ABC) - Calificación: 5.0", fontSize = 13.sp, color = Texto.copy(alpha = 0.8f))
+                Button(
+                    onClick = { mostrarDialogoNuevoRepartidor = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Coral)
+                ) {
+                    Text("＋ Agregar nuevo repartidor", fontWeight = FontWeight.Bold)
+                }
+
+                if (repartidores.isEmpty()) {
+                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFE2EAF4))) {
+                        Text("No hay repartidores registrados.", modifier = Modifier.padding(16.dp), color = Texto)
+                    }
+                } else {
+                    repartidores.forEachIndexed { index, rep ->
+                        Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text(text = rep.nombre, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Texto)
+                                    Surface(shape = RoundedCornerShape(8.dp), color = if (rep.activo) Color(0xFFE5ECD7) else Color(0xFFFBE1D5)) {
+                                        Text(text = if (rep.activo) "🟢 Activo" else "🔴 Inactivo", modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (rep.activo) Verde else Coral)
+                                    }
+                                }
+                                Text(text = "Vehículo: ${rep.vehiculo} | Placa: ${rep.placa}", color = Texto.copy(alpha = 0.8f), fontSize = 14.sp)
+                                Text(text = "Tel: ${rep.telefono} | ⭐ ${rep.calificacion}", fontSize = 13.sp, color = Verde)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    OutlinedButton(onClick = {
+                                        val repartidorEliminado = repartidores.removeAt(index)
+                                        eliminarRepartidorEnFirestore(repartidorEliminado.nombre)
+                                    }, shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Coral)) {
+                                        Text("Eliminar repartidor")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1700,36 +2346,63 @@ private fun PantallaAdmin(
         var nombreKit by remember { mutableStateOf("") }
         var platilloKit by remember { mutableStateOf("") }
         var precioKit by remember { mutableStateOf("") }
+        var iconoSeleccionado by remember { mutableStateOf("🍲") }
+        val iconosOpciones = listOf("🍝", "🍕", "🌮", "🍔", "🍣", "🥗", "🍲", "🍰", "🍳", "🥩")
+
         AlertDialog(
             onDismissRequest = { mostrarDialogoNuevoKit = false },
             containerColor = Crema,
             title = { Text("Agregar nuevo kit / platillo al menú", fontWeight = FontWeight.Bold, color = Verde) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(value = nombreKit, onValueChange = { nombreKit = it }, label = { Text("Nombre del kit") }, shape = RoundedCornerShape(12.dp))
-                    OutlinedTextField(value = platilloKit, onValueChange = { platilloKit = it }, label = { Text("Platillo") }, shape = RoundedCornerShape(12.dp))
-                    OutlinedTextField(value = precioKit, onValueChange = { precioKit = it }, label = { Text("Precio en MXN") }, shape = RoundedCornerShape(12.dp))
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedTextField(value = nombreKit, onValueChange = { nombreKit = it }, label = { Text("Nombre del kit") }, placeholder = { Text("ej. Gourmet Burger") }, shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = platilloKit, onValueChange = { platilloKit = it }, label = { Text("Platillo") }, placeholder = { Text("ej. Hamburguesa artesanal") }, shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = precioKit, onValueChange = { precioKit = it }, label = { Text("Precio en MXN") }, placeholder = { Text("380") }, shape = RoundedCornerShape(12.dp))
+
+                    Text("Selecciona un ícono para el platillo:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Verde)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        iconosOpciones.forEach { emoji ->
+                            FilterChip(
+                                selected = (iconoSeleccionado == emoji),
+                                onClick = { iconoSeleccionado = emoji },
+                                label = { Text(emoji, fontSize = 20.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Coral,
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     if (nombreKit.isNotBlank() && platilloKit.isNotBlank()) {
-                        kits.add(
-                            Kit(
-                                nombre = nombreKit,
-                                subtitulo = "Especialidad del Chef",
-                                platillo = platilloKit,
-                                minutos = 20,
-                                personas = "2 personas",
-                                porcionesIniciales = 2,
-                                fondo = Color(0xFFFFEDC3),
-                                ingredientes = "Ingredientes frescos seleccionados.",
-                                utensilios = "Sartén y espátula.",
-                                videoUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
-                                disponible = true,
-                                precio = precioKit.toIntOrNull() ?: 380
-                            )
+                        val nuevoKit = Kit(
+                            nombre = nombreKit.trim(),
+                            subtitulo = "Especialidad del Chef",
+                            platillo = platilloKit.trim(),
+                            minutos = 20,
+                            personas = "2 personas",
+                            porcionesIniciales = 2,
+                            fondo = Color(0xFFFFEDC3),
+                            ingredientes = "Ingredientes frescos seleccionados de alta calidad.",
+                            utensilios = "Sartén y espátula.",
+                            videoUrl = "android.resource://com.example.munch/raw/pasta",
+                            disponible = true,
+                            precio = precioKit.toIntOrNull() ?: 380,
+                            iconoEmoji = iconoSeleccionado
                         )
+                        kits.add(nuevoKit)
+                        guardarKitEnFirestore(nuevoKit)
                         mostrarDialogoNuevoKit = false
                     }
                 }) {
@@ -1738,6 +2411,148 @@ private fun PantallaAdmin(
             },
             dismissButton = {
                 TextButton(onClick = { mostrarDialogoNuevoKit = false }) {
+                    Text("Cancelar", color = Verde, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    if (mostrarDialogoNuevoRepartidor) {
+        var nombreRep by remember { mutableStateOf("") }
+        var emailRep by remember { mutableStateOf("") }
+        var passwordRep by remember { mutableStateOf("") }
+        var vehiculoRep by remember { mutableStateOf("") }
+        var placaRep by remember { mutableStateOf("") }
+        var telefonoRep by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { mostrarDialogoNuevoRepartidor = false },
+            containerColor = Crema,
+            title = { Text("Agregar nuevo repartidor", fontWeight = FontWeight.Bold, color = Verde) },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedTextField(value = nombreRep, onValueChange = { nombreRep = it }, label = { Text("Nombre completo") }, placeholder = { Text("ej. Luis Morales") }, shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = emailRep, onValueChange = { emailRep = it }, label = { Text("Correo de acceso") }, placeholder = { Text("ej. repartidor@munch.com") }, shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = passwordRep, onValueChange = { passwordRep = it }, label = { Text("Contraseña de acceso") }, placeholder = { Text("••••••") }, shape = RoundedCornerShape(12.dp), visualTransformation = PasswordVisualTransformation())
+                    OutlinedTextField(value = vehiculoRep, onValueChange = { vehiculoRep = it }, label = { Text("Vehículo") }, placeholder = { Text("ej. Motoneta Itálica 125cc") }, shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = placaRep, onValueChange = { placaRep = it }, label = { Text("Placa o Identificador") }, placeholder = { Text("ej. 89XYZ") }, shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = telefonoRep, onValueChange = { telefonoRep = it }, label = { Text("Teléfono de contacto") }, placeholder = { Text("ej. 5512345678") }, shape = RoundedCornerShape(12.dp))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val e = emailRep.trim().lowercase()
+                    val p = passwordRep.trim()
+                    if (nombreRep.isNotBlank() && e.isNotBlank()) {
+                        val nuevoRepartidor = RepartidorItem(
+                            nombre = nombreRep.trim(),
+                            email = e,
+                            vehiculo = vehiculoRep.ifBlank { "Motoneta" },
+                            placa = placaRep.ifBlank { "000AA" },
+                            telefono = telefonoRep.ifBlank { "5500000000" },
+                            calificacion = 5.0,
+                            activo = true
+                        )
+                        repartidores.add(nuevoRepartidor)
+                        guardarRepartidorEnFirestore(nuevoRepartidor)
+
+                        try {
+                            val usuarioDriverMap = mapOf(
+                                "nombre" to nombreRep.trim(),
+                                "email" to e,
+                                "password" to p.ifBlank { "driver123" },
+                                "rol" to "driver",
+                                "fechaRegistro" to SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
+                            )
+                            FirebaseFirestore.getInstance().collection("usuarios").document(e).set(usuarioDriverMap)
+                        } catch (_: Exception) {}
+
+                        mostrarDialogoNuevoRepartidor = false
+                    }
+                }) {
+                    Text("Registrar repartidor", color = Coral, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { mostrarDialogoNuevoRepartidor = false }) {
+                    Text("Cancelar", color = Verde, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    if (kitAEditar != null) {
+        val kitActual = kitAEditar!!
+        var nombreKit by remember(kitActual) { mutableStateOf(kitActual.nombre) }
+        var subtituloKit by remember(kitActual) { mutableStateOf(kitActual.subtitulo) }
+        var platilloKit by remember(kitActual) { mutableStateOf(kitActual.platillo) }
+        var precioKit by remember(kitActual) { mutableStateOf(kitActual.precio.toString()) }
+        var minutosKit by remember(kitActual) { mutableStateOf(kitActual.minutos.toString()) }
+        var ingredientesKit by remember(kitActual) { mutableStateOf(kitActual.ingredientes) }
+        var iconoSeleccionado by remember(kitActual) { mutableStateOf(if (kitActual.iconoEmoji.isNotBlank()) kitActual.iconoEmoji else "🍲") }
+        val iconosOpciones = listOf("🍝", "🍕", "🌮", "🍔", "🍣", "🥗", "🍲", "🍰", "🍳", "🥩")
+
+        AlertDialog(
+            onDismissRequest = { kitAEditar = null },
+            containerColor = Crema,
+            title = { Text("Editar kit / platillo", fontWeight = FontWeight.Bold, color = Verde) },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedTextField(value = nombreKit, onValueChange = { nombreKit = it }, label = { Text("Nombre del kit") }, shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = subtituloKit, onValueChange = { subtituloKit = it }, label = { Text("Subtítulo") }, shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = platilloKit, onValueChange = { platilloKit = it }, label = { Text("Platillo") }, shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = precioKit, onValueChange = { precioKit = it }, label = { Text("Precio en MXN") }, shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = minutosKit, onValueChange = { minutosKit = it }, label = { Text("Minutos de preparación") }, shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = ingredientesKit, onValueChange = { ingredientesKit = it }, label = { Text("Ingredientes") }, shape = RoundedCornerShape(12.dp), maxLines = 3)
+
+                    Text("Ícono del platillo:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Verde)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        iconosOpciones.forEach { emoji ->
+                            FilterChip(
+                                selected = (iconoSeleccionado == emoji),
+                                onClick = { iconoSeleccionado = emoji },
+                                label = { Text(emoji, fontSize = 20.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Coral,
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (nombreKit.isNotBlank() && platilloKit.isNotBlank()) {
+                        val kitModificado = kitActual.copy(
+                            nombre = nombreKit.trim(),
+                            subtitulo = subtituloKit.trim(),
+                            platillo = platilloKit.trim(),
+                            precio = precioKit.toIntOrNull() ?: kitActual.precio,
+                            minutos = minutosKit.toIntOrNull() ?: kitActual.minutos,
+                            ingredientes = ingredientesKit.trim(),
+                            iconoEmoji = iconoSeleccionado
+                        )
+                        actualizarKitEnListaYFirestore(kits, kitModificado)
+                        kitAEditar = null
+                    }
+                }) {
+                    Text("Guardar cambios", color = Coral, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { kitAEditar = null }) {
                     Text("Cancelar", color = Verde, fontWeight = FontWeight.Bold)
                 }
             }

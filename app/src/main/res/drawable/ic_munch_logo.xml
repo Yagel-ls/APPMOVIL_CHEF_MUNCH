@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+
+    <!-- Outer Decorative Ring -->
+    <path
+        android:fillColor="#FFF8ED"
+        android:pathData="M60,10 A50,50 0 1,1 59.9,10 Z" />
+
+    <path
+        android:strokeColor="#D95740"
+        android:strokeWidth="4"
+        android:pathData="M60,14 A46,46 0 1,1 59.9,14 Z" />
+
+    <!-- Chef Hat Base / Pot -->
+    <path
+        android:fillColor="#D95740"
+        android:pathData="M38,68 L82,68 C84,68 86,70 85,72 L80,88 C79,91 76,93 72,93 L48,93 C44,93 41,91 40,88 L35,72 C34,70 36,68 38,68 Z" />
+
+    <!-- Cooking Steam / Flames -->
+    <path
+        android:fillColor="#486039"
+        android:pathData="M48,32 C48,26 54,24 54,20 C54,18 52,16 50,16 C48,16 46,18 46,20 L42,20 C42,16 46,12 50,12 C55,12 58,15 58,20 C58,25 52,28 52,32 L48,32 Z" />
+
+    <path
+        android:fillColor="#D95740"
+        android:pathData="M60,32 C60,25 68,22 68,17 C68,14 65,12 62,12 C59,12 57,14 57,17 L53,17 C53,12 57,8 62,8 C68,8 72,12 72,17 C72,23 64,27 64,32 L60,32 Z" />
+
+    <!-- Chef Hat Top Puff -->
+    <path
+        android:fillColor="#486039"
+        android:pathData="M42,66 C37,66 33,62 33,57 C33,53 36,49 40,48 C40,42 45,37 51,37 C54,37 57,38 60,40 C63,38 66,37 69,37 C75,37 80,42 80,48 C84,49 87,53 87,57 C87,62 83,66 78,66 Z" />
+
+    <!-- Pot Handle / Rim Accent -->
+    <path
+        android:fillColor="#FFF8ED"
+        android:pathData="M34,68 L86,68 L86,72 L34,72 Z" />
+</vector>

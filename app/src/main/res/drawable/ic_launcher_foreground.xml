@@ -1,30 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path android:pathData="M31,63.928c0,0 6.4,-11 12.1,-13.1c7.2,-2.6 26,-1.4 26,-1.4l38.1,38.1L107,108.928l-32,-1L31,63.928z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:endX="85.84757"
-                android:endY="92.4963"
-                android:startX="42.9492"
-                android:startY="49.59793"
-                android:type="linear">
-                <item
-                    android:color="#44000000"
-                    android:offset="0.0" />
-                <item
-                    android:color="#00000000"
-                    android:offset="1.0" />
-            </gradient>
-        </aapt:attr>
-    </path>
+
+    <!-- Chef Hat Puff -->
     <path
-        android:fillColor="#FFFFFF"
-        android:fillType="nonZero"
-        android:pathData="M65.3,45.828l3.8,-6.6c0.2,-0.4 0.1,-0.9 -0.3,-1.1c-0.4,-0.2 -0.9,-0.1 -1.1,0.3l-3.9,6.7c-6.3,-2.8 -13.4,-2.8 -19.7,0l-3.9,-6.7c-0.2,-0.4 -0.7,-0.5 -1.1,-0.3C38.8,38.328 38.7,38.828 38.9,39.228l3.8,6.6C36.2,49.428 31.7,56.028 31,63.928h46C76.3,56.028 71.8,49.428 65.3,45.828zM43.4,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2c-0.3,-0.7 -0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C45.3,56.528 44.5,57.328 43.4,57.328L43.4,57.328zM64.6,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2s-0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C66.5,56.528 65.6,57.328 64.6,57.328L64.6,57.328z"
-        android:strokeWidth="1"
-        android:strokeColor="#00000000" />
+        android:fillColor="#FFF8ED"
+        android:pathData="M38,58 C34,58 31,55 31,51 C31,48 33,45 36,44 C36,39 40,35 45,35 C48,35 51,36 54,38 C57,36 60,35 63,35 C68,35 72,39 72,44 C75,45 77,48 77,51 C77,55 74,58 70,58 Z" />
+
+    <!-- Pot Base -->
+    <path
+        android:fillColor="#FFF8ED"
+        android:pathData="M35,60 L73,60 C75,60 76,61 76,63 L72,76 C71,78 69,80 66,80 L42,80 C39,80 37,78 36,76 L32,63 C32,61 33,60 35,60 Z" />
+
+    <!-- Pot Accent Line -->
+    <path
+        android:fillColor="#486039"
+        android:pathData="M32,60 L76,60 L76,63 L32,63 Z" />
+
+    <!-- M Accent -->
+    <path
+        android:fillColor="#486039"
+        android:pathData="M44,67 L48,67 L54,74 L60,67 L64,67 L64,77 L60,77 L60,71 L55,77 L53,77 L48,71 L48,77 L44,77 Z" />
 </vector>
